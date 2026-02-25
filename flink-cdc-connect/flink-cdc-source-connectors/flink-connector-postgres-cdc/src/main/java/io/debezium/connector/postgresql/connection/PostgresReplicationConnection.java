@@ -453,8 +453,8 @@ public class PostgresReplicationConnection extends JdbcConnection implements Rep
         try (Statement stmt = pgConnection().createStatement()) {
             String createCommand =
                     String.format(
-                            "CREATE_REPLICATION_SLOT \"%s\" %s LOGICAL %s",
-                            slotName, tempPart, plugin.getPostgresPluginName());
+                            "CREATE_REPLICATION_SLOT \"%s\" %s LOGICAL %s %s",
+                            slotName, tempPart, plugin.getPostgresPluginName(), "EXPORT_SNAPSHOT");
             LOGGER.info("Creating replication slot with command {}", createCommand);
             stmt.execute(createCommand);
             // when we are in Postgres 9.4+, we can parse the slot creation info,

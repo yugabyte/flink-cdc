@@ -91,11 +91,11 @@ public class UniqueDatabase {
     }
 
     public String getHost() {
-        return container.getHost();
+        return PostgresTestBase.TEST_HOST;
     }
 
     public int getDatabasePort() {
-        return container.getMappedPort(5432);
+        return PostgresTestBase.TEST_PORT;
     }
 
     public String getDatabaseName() {

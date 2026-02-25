@@ -59,7 +59,6 @@ import static io.debezium.connector.postgresql.PostgresConnectorConfig.PLUGIN_NA
 import static io.debezium.connector.postgresql.PostgresConnectorConfig.SLOT_NAME;
 import static io.debezium.connector.postgresql.PostgresObjectUtils.createReplicationConnection;
 import static io.debezium.connector.postgresql.PostgresObjectUtils.newPostgresValueConverterBuilder;
-import static io.debezium.connector.postgresql.Utils.currentOffset;
 
 /** The dialect for Postgres. */
 public class PostgresDialect implements JdbcDataSourceDialect {
@@ -134,7 +133,8 @@ public class PostgresDialect implements JdbcDataSourceDialect {
     public Offset displayCurrentOffset(JdbcSourceConfig sourceConfig) {
 
         try (JdbcConnection jdbc = openJdbcConnection(sourceConfig)) {
-            return currentOffset((PostgresConnection) jdbc);
+            return PostgresConnectionUtils.committedOffset(
+                    (PostgresConnection) jdbc, getSlotName(), getPluginName());
 
         } catch (SQLException e) {
             throw new FlinkRuntimeException(e);

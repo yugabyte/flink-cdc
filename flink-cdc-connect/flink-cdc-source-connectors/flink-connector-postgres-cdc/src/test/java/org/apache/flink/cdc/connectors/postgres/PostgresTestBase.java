@@ -35,7 +35,6 @@ import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
-import org.testcontainers.lifecycle.Startables;
 import org.testcontainers.utility.DockerImageName;
 
 import javax.annotation.Nullable;
@@ -57,7 +56,6 @@ import java.util.Random;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import static java.lang.Thread.sleep;
 
@@ -68,9 +66,11 @@ import static java.lang.Thread.sleep;
 public abstract class PostgresTestBase extends AbstractTestBase {
     protected static final Logger LOG = LoggerFactory.getLogger(PostgresTestBase.class);
     public static final Pattern COMMENT_PATTERN = Pattern.compile("^(.*)--.*$");
-    public static final String DEFAULT_DB = "postgres";
-    public static final String TEST_USER = "postgres";
-    public static final String TEST_PASSWORD = "postgres";
+    public static final String DEFAULT_DB = "yugabyte";
+    public static final String TEST_USER = "yugabyte";
+    public static final String TEST_PASSWORD = "yugabyte";
+    public static final String TEST_HOST = "localhost";
+    public static final int TEST_PORT = 5433;
 
     // use official postgresql image to support pgoutput plugin
     protected static final DockerImageName PG_IMAGE =
@@ -99,23 +99,22 @@ public abstract class PostgresTestBase extends AbstractTestBase {
 
     @BeforeAll
     static void startContainers() throws Exception {
-        LOG.info("Starting containers...");
-        Startables.deepStart(Stream.of(POSTGRES_CONTAINER)).join();
-        LOG.info("Containers are started.");
+        LOG.info("Using external PostgreSQL database at {}:{}", TEST_HOST, TEST_PORT);
     }
 
     @AfterAll
     static void stopContainers() {
-        LOG.info("Stopping containers...");
-        if (POSTGRES_CONTAINER != null) {
-            POSTGRES_CONTAINER.stop();
-        }
-        LOG.info("Containers are stopped.");
+        LOG.info("Using external database, no containers to stop.");
     }
 
     protected Connection getJdbcConnection(PostgreSQLContainer container) throws SQLException {
-        return DriverManager.getConnection(
-                container.getJdbcUrl(), container.getUsername(), container.getPassword());
+        String jdbcUrl =
+                String.format(
+                        PostgresConnectionPoolFactory.JDBC_URL_PATTERN,
+                        TEST_HOST,
+                        TEST_PORT,
+                        DEFAULT_DB);
+        return DriverManager.getConnection(jdbcUrl, TEST_USER, TEST_PASSWORD);
     }
 
     public static Connection getJdbcConnection(PostgreSQLContainer container, String databaseName)
@@ -123,11 +122,10 @@ public abstract class PostgresTestBase extends AbstractTestBase {
         String jdbcUrl =
                 String.format(
                         PostgresConnectionPoolFactory.JDBC_URL_PATTERN,
-                        container.getHost(),
-                        container.getMappedPort(PostgreSQLContainer.POSTGRESQL_PORT),
+                        TEST_HOST,
+                        TEST_PORT,
                         databaseName);
-        return DriverManager.getConnection(
-                jdbcUrl, container.getUsername(), container.getPassword());
+        return DriverManager.getConnection(jdbcUrl, TEST_USER, TEST_PASSWORD);
     }
 
     public static String getSlotName() {

@@ -160,11 +160,18 @@ public class PostgresStreamingChangeEventSource
                 replicationStream.compareAndSet(
                         null, replicationConnection.startStreaming(lsn, walPosition));
             } else {
+                final Lsn slotLsn = connection.getReplicationSlotLsn(connectorConfig.slotName());
+                if (slotLsn == null || !slotLsn.isValid()) {
+                    throw new ConnectException(
+                            "Could not determine a valid start LSN from replication slot '"
+                                    + connectorConfig.slotName()
+                                    + "'");
+                }
                 LOGGER.info(
-                        "No previous LSN found in Kafka, streaming from the latest xlogpos or flushed LSN...");
+                        "No previous LSN found, streaming from replication slot LSN '{}'", slotLsn);
                 walPosition = new WalPositionLocator();
                 replicationStream.compareAndSet(
-                        null, replicationConnection.startStreaming(walPosition));
+                        null, replicationConnection.startStreaming(slotLsn, walPosition));
             }
             // for large dbs, the refresh of schema can take too much time
             // such that the connection times out. We must enable keep

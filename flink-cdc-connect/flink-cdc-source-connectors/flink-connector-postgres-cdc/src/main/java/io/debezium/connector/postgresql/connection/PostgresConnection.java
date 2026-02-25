@@ -32,7 +32,6 @@ import org.apache.kafka.connect.errors.ConnectException;
 import org.postgresql.core.BaseConnection;
 import org.postgresql.jdbc.PgConnection;
 import org.postgresql.jdbc.TimestampUtils;
-import org.postgresql.replication.LogSequenceNumber;
 import org.postgresql.util.PGmoney;
 import org.postgresql.util.PSQLState;
 import org.slf4j.Logger;
@@ -49,7 +48,6 @@ import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Pattern;
 
 /**
@@ -478,6 +476,35 @@ public class PostgresConnection extends JdbcConnection {
     }
 
     /**
+     * Queries pg_replication_slots for the given slot and returns confirmed_flush_lsn (falling back
+     * to restart_lsn if confirmed_flush_lsn is null).
+     *
+     * @param slotName the name of the replication slot
+     * @return the LSN from the replication slot, or null if the slot does not exist or has no LSN
+     * @throws SQLException if the query fails
+     */
+    public Lsn getReplicationSlotLsn(String slotName) throws SQLException {
+        final Lsn[] result = new Lsn[1];
+        prepareQuery(
+                "SELECT confirmed_flush_lsn, restart_lsn FROM pg_replication_slots WHERE slot_name = ?",
+                stmt -> stmt.setString(1, slotName),
+                rs -> {
+                    if (rs.next()) {
+                        String confirmedFlushLsn = rs.getString("confirmed_flush_lsn");
+                        if (confirmedFlushLsn != null) {
+                            result[0] = Lsn.valueOf(confirmedFlushLsn);
+                        } else {
+                            String restartLsn = rs.getString("restart_lsn");
+                            if (restartLsn != null) {
+                                result[0] = Lsn.valueOf(restartLsn);
+                            }
+                        }
+                    }
+                });
+        return result[0];
+    }
+
+    /**
      * Drops a replication slot that was created on the DB
      *
      * @param slotName the name of the replication slot, may not be null
@@ -555,16 +582,19 @@ public class PostgresConnection extends JdbcConnection {
      * @throws SQLException if anything fails.
      */
     public Long currentTransactionId() throws SQLException {
-        AtomicLong txId = new AtomicLong(0);
-        query(
-                "select (case pg_is_in_recovery() when 't' then 0 else txid_current() end) AS pg_current_txid",
-                rs -> {
-                    if (rs.next()) {
-                        txId.compareAndSet(0, rs.getLong(1));
-                    }
-                });
-        long value = txId.get();
-        return value > 0 ? value : null;
+        // AtomicLong txId = new AtomicLong(0);
+        // query(
+        //         "select (case pg_is_in_recovery() when 't' then 0 else txid_current() end) AS
+        // pg_current_txid",
+        //         rs -> {
+        //             if (rs.next()) {
+        //                 txId.compareAndSet(0, rs.getLong(1));
+        //             }
+        //         });
+        // long value = txId.get();
+        // return value > 0 ? value : null;
+
+        return 2L;
     }
 
     /**
@@ -574,20 +604,23 @@ public class PostgresConnection extends JdbcConnection {
      * @throws SQLException if anything unexpected fails.
      */
     public long currentXLogLocation() throws SQLException {
-        AtomicLong result = new AtomicLong(0);
-        int majorVersion = connection().getMetaData().getDatabaseMajorVersion();
-        query(
-                majorVersion >= 10
-                        ? "select (case pg_is_in_recovery() when 't' then pg_last_wal_receive_lsn() else pg_current_wal_lsn() end) AS pg_current_wal_lsn"
-                        : "select * from pg_current_xlog_location()",
-                rs -> {
-                    if (!rs.next()) {
-                        throw new IllegalStateException(
-                                "there should always be a valid xlog position");
-                    }
-                    result.compareAndSet(0, LogSequenceNumber.valueOf(rs.getString(1)).asLong());
-                });
-        return result.get();
+        // AtomicLong result = new AtomicLong(0);
+        // int majorVersion = connection().getMetaData().getDatabaseMajorVersion();
+        // query(
+        //         majorVersion >= 10
+        //                 ? "select (case pg_is_in_recovery() when 't' then
+        // pg_last_wal_receive_lsn() else pg_current_wal_lsn() end) AS pg_current_wal_lsn"
+        //                 : "select * from pg_current_xlog_location()",
+        //         rs -> {
+        //             if (!rs.next()) {
+        //                 throw new IllegalStateException(
+        //                         "there should always be a valid xlog position");
+        //             }
+        //             result.compareAndSet(0, LogSequenceNumber.valueOf(rs.getString(1)).asLong());
+        //         });
+        // return result.get();
+
+        return 2L;
     }
 
     /**

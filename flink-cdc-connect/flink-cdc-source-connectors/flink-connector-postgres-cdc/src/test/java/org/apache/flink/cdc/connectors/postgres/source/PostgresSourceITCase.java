@@ -52,6 +52,7 @@ import org.assertj.core.api.Assertions;
 import org.assertj.core.api.Assumptions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.extension.RegisterExtension;
@@ -381,6 +382,7 @@ class PostgresSourceITCase extends PostgresTestBase {
         assertEqualsInAnyOrder(expectedRecords, records);
     }
 
+    @Disabled("YugabyteDB does not support incremental snapshot")
     @Test
     void testSnapshotOnlyModeWithDMLPreHighWaterMark() throws Exception {
         // The data num is 21, set fetchSize = 22 to test the job is bounded
@@ -415,6 +417,7 @@ class PostgresSourceITCase extends PostgresTestBase {
         assertEqualsInAnyOrder(expectedRecords, records);
     }
 
+    @Disabled("YugabyteDB does not support incremental snapshot")
     @ParameterizedTest
     @ValueSource(strings = {"initial", "latest-offset"})
     void testEnableBackfillWithDMLPreHighWaterMark(String scanStartupMode) throws Exception {

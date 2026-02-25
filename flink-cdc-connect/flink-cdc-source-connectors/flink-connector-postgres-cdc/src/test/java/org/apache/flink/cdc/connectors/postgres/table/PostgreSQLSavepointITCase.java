@@ -44,8 +44,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 
-import static org.testcontainers.containers.PostgreSQLContainer.POSTGRESQL_PORT;
-
 /** Integration tests for PostgreSQL to start from a savepoint. */
 class PostgreSQLSavepointITCase extends PostgresTestBase {
 
@@ -92,11 +90,11 @@ class PostgreSQLSavepointITCase extends PostgresTestBase {
                                 + " 'decoding.plugin.name' = 'pgoutput', "
                                 + " 'slot.name' = '%s'"
                                 + ")",
-                        POSTGRES_CONTAINER.getHost(),
-                        POSTGRES_CONTAINER.getMappedPort(POSTGRESQL_PORT),
-                        POSTGRES_CONTAINER.getUsername(),
-                        POSTGRES_CONTAINER.getPassword(),
-                        POSTGRES_CONTAINER.getDatabaseName(),
+                        TEST_HOST,
+                        TEST_PORT,
+                        TEST_USER,
+                        TEST_PASSWORD,
+                        DEFAULT_DB,
                         "inventory",
                         "products",
                         getSlotName());
@@ -115,9 +113,9 @@ class PostgreSQLSavepointITCase extends PostgresTestBase {
         try (Connection connection = getJdbcConnection(POSTGRES_CONTAINER);
                 Statement statement = connection.createStatement()) {
             statement.execute(
-                    "INSERT INTO inventory.products VALUES (default,'jacket','water resistent white wind breaker',0.2);"); // 110
+                    "INSERT INTO inventory.products VALUES (110,'jacket','water resistent white wind breaker',0.2);");
             statement.execute(
-                    "INSERT INTO inventory.products VALUES (default,'scooter','Big 2-wheel scooter ',5.18);");
+                    "INSERT INTO inventory.products VALUES (111,'scooter','Big 2-wheel scooter ',5.18);");
             statement.execute(
                     "UPDATE inventory.products SET description='new water resistent white wind breaker', weight='0.5' WHERE id=110;");
             statement.execute("UPDATE inventory.products SET weight='5.17' WHERE id=111;");
@@ -149,9 +147,9 @@ class PostgreSQLSavepointITCase extends PostgresTestBase {
         try (Connection connection = getJdbcConnection(POSTGRES_CONTAINER);
                 Statement statement = connection.createStatement()) {
             statement.execute(
-                    "INSERT INTO inventory.products VALUES (default,'jacket','water resistent white wind breaker',0.2);"); // 112
+                    "INSERT INTO inventory.products VALUES (112,'jacket','water resistent white wind breaker',0.2);");
             statement.execute(
-                    "INSERT INTO inventory.products VALUES (default,'scooter','Big 2-wheel scooter ',5.18);");
+                    "INSERT INTO inventory.products VALUES (113,'scooter','Big 2-wheel scooter ',5.18);");
             statement.execute(
                     "UPDATE inventory.products SET description='new water resistent white wind breaker', weight='0.5' WHERE id=112;");
             statement.execute("UPDATE inventory.products SET weight='5.17' WHERE id=113;");
