@@ -86,19 +86,21 @@ public class PostgresSnapshotChangeEventSource
     protected void connectionCreated(
             RelationalSnapshotContext<PostgresPartition, PostgresOffsetContext> snapshotContext)
             throws Exception {
-        // If using catch up streaming, the connector opens the transaction that the snapshot will
-        // eventually use
-        // before the catch up streaming starts. By looking at the current wal location, the
-        // transaction can determine
-        // where the catch up streaming should stop. The transaction is held open throughout the
-        // catch up
-        // streaming phase so that the snapshot is performed from a consistent view of the data.
-        // Since the isolation
-        // level on the transaction used in catch up streaming has already set the isolation level
-        // and executed
-        // statements, the transaction does not need to get set the level again here.
-        if (snapshotter.shouldStreamEventsStartingFromSnapshot() && startingSlotInfo == null) {
-            setSnapshotTransactionIsolationLevel();
+        if (YugabyteDBServer.isEnabled()) {
+            // YB always needs the preparatory statements; on-demand blocking snapshots
+            // don't exist in Debezium 1.9.8, so isOnDemand is always false.
+            setSnapshotTransactionIsolationLevel(false);
+        } else if (snapshotter.shouldStreamEventsStartingFromSnapshot()
+                && startingSlotInfo == null) {
+            // If using catch up streaming, the connector opens the transaction that the snapshot
+            // will eventually use before the catch up streaming starts. By looking at the current
+            // wal location, the transaction can determine where the catch up streaming should
+            // stop. The transaction is held open throughout the catch up streaming phase so that
+            // the snapshot is performed from a consistent view of the data. Since the isolation
+            // level on the transaction used in catch up streaming has already set the isolation
+            // level and executed statements, the transaction does not need to get set the level
+            // again here.
+            setSnapshotTransactionIsolationLevel(false);
         }
         schema.refresh(jdbcConnection, false);
     }
@@ -281,12 +283,50 @@ public class PostgresSnapshotChangeEventSource
         return snapshotter.buildSnapshotQuery(tableId, columns);
     }
 
-    protected void setSnapshotTransactionIsolationLevel() throws SQLException {
+    /**
+     * Disables YB's catalog-version check on the snapshot connection so a concurrent DDL doesn't
+     * invalidate this transaction's catalog snapshot (otherwise surfaces as {@code kSnapshotTooOld}
+     * with hint "Catalog Version Mismatch"). Falls back to the {@code
+     * disable_catalog_version_check()} procedure if the GUC is absent.
+     */
+    protected void disableCatalogVersionCheck() throws SQLException {
+        final String disableCatalogVersionCheckStmt =
+                "DO "
+                        + "LANGUAGE plpgsql $$ "
+                        + "BEGIN "
+                        + "SET yb_disable_catalog_version_check = true; "
+                        + "EXCEPTION "
+                        + "WHEN sqlstate '42704' THEN "
+                        + "RAISE EXCEPTION 'GUC not found'; "
+                        + "WHEN OTHERS THEN "
+                        + "CALL disable_catalog_version_check(); "
+                        + "END $$;";
+
+        LOGGER.info(
+                "Disabling catalog version check with statement: {}",
+                disableCatalogVersionCheckStmt);
+        try {
+            jdbcConnection.execute(disableCatalogVersionCheckStmt);
+        } catch (SQLException sqle) {
+            if (sqle.getMessage().contains("GUC not found")) {
+                LOGGER.warn("GUC not present: yb_disable_catalog_version_check");
+                jdbcConnection.execute("ABORT;");
+            } else {
+                throw sqle;
+            }
+        }
+    }
+
+    protected void setSnapshotTransactionIsolationLevel(boolean isOnDemand) throws SQLException {
+        if (YugabyteDBServer.isEnabled()) {
+            disableCatalogVersionCheck();
+        }
+
         LOGGER.info("Setting isolation level");
         String transactionStatement =
                 snapshotter.snapshotTransactionIsolationLevelStatement(slotCreatedInfo);
         LOGGER.info("Opening transaction with statement {}", transactionStatement);
-        // SET TRANSACTION SNAPSHOT is not supported in a batch, so execute each
+        // SET TRANSACTION SNAPSHOT is not supported in a batch on YB, so execute each
         // statement individually when the transaction statement contains multiple parts.
         String[] statements = transactionStatement.split(";");
         for (String stmt : statements) {
@@ -295,6 +335,15 @@ public class PostgresSnapshotChangeEventSource
                 LOGGER.info("Executing transaction statement: {}", trimmed);
                 jdbcConnection.executeWithoutCommitting(trimmed);
             }
+        }
+
+        if (YugabyteDBServer.isEnabled()) {
+            String transactionIsolationLevelStatement =
+                    "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL SERIALIZABLE, READ ONLY, DEFERRABLE;";
+            LOGGER.info(
+                    "Setting session characteristics with statement {}",
+                    transactionIsolationLevelStatement);
+            jdbcConnection.executeWithoutCommitting(transactionIsolationLevelStatement);
         }
     }
 
