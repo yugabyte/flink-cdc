@@ -426,6 +426,29 @@ public class PostgresReplicationConnection extends JdbcConnection implements Rep
         }
     }
 
+    private String getReplicationSlotCreationCommand(String tempPart, boolean canExportSnapshot) {
+        return String.format(
+                "CREATE_REPLICATION_SLOT \"%s\" %s LOGICAL %s %s",
+                slotName,
+                tempPart,
+                plugin.getPostgresPluginName(),
+                canExportSnapshot ? "EXPORT_SNAPSHOT" : "USE_SNAPSHOT");
+    }
+
+    private boolean isExportSnapshotSupported(Exception exception) {
+        if (exception.getMessage() != null
+                && (exception
+                                .getMessage()
+                                .contains(
+                                        "cannot export or import snapshot when ysql_enable_pg_export_snapshot is disabled")
+                        || exception
+                                .getMessage()
+                                .contains("Exporting snapshot is not yet supported"))) {
+            return false;
+        }
+        return true;
+    }
+
     @Override
     public Optional<SlotCreationResult> createReplicationSlot() throws SQLException {
         // note that some of these options are only supported in Postgres 9.4+, additionally
@@ -451,16 +474,35 @@ public class PostgresReplicationConnection extends JdbcConnection implements Rep
         initPublication();
 
         try (Statement stmt = pgConnection().createStatement()) {
-            String createCommand =
-                    String.format(
-                            "CREATE_REPLICATION_SLOT \"%s\" %s LOGICAL %s %s",
-                            slotName, tempPart, plugin.getPostgresPluginName(), "EXPORT_SNAPSHOT");
-            LOGGER.info("Creating replication slot with command {}", createCommand);
-            stmt.execute(createCommand);
-            // when we are in Postgres 9.4+, we can parse the slot creation info,
-            // otherwise, it returns nothing
-            if (canExportSnapshot) {
-                this.slotCreationInfo = parseSlotCreation(stmt.getResultSet());
+            try {
+                // Use EXPORT_SNAPSHOT just like upstream debezium does.
+                String createCommand = getReplicationSlotCreationCommand(tempPart, true);
+                LOGGER.info("Creating replication slot with command {}", createCommand);
+                stmt.execute(createCommand);
+                if (canExportSnapshot) {
+                    this.slotCreationInfo = parseSlotCreation(stmt.getResultSet(), true);
+                }
+            } catch (Exception e) {
+                if (!isExportSnapshotSupported(e)) {
+                    LOGGER.warn(
+                            "Failed to create replication slot with EXPORT_SNAPSHOT option, falling back to USE_SNAPSHOT, Exception: {}",
+                            e.getMessage());
+                    // YB: If the create replication slot command fails as a fallback mechanism
+                    // we will try to create the slot again with the USE_SNAPSHOT option.
+                    // This is to make it backward compatible with the old version of YugabyteDB.
+                    String createCommand = getReplicationSlotCreationCommand(tempPart, false);
+                    LOGGER.info("Creating replication slot with command {}", createCommand);
+                    stmt.execute(createCommand);
+
+                    if (canExportSnapshot) {
+                        this.slotCreationInfo = parseSlotCreation(stmt.getResultSet(), false);
+                    }
+                } else {
+                    if (e instanceof SQLException) {
+                        throw (SQLException) e;
+                    }
+                    throw new SQLException(e);
+                }
             }
 
             return Optional.ofNullable(slotCreationInfo);
@@ -471,7 +513,7 @@ public class PostgresReplicationConnection extends JdbcConnection implements Rep
         return (BaseConnection) connection(false);
     }
 
-    private SlotCreationResult parseSlotCreation(ResultSet rs) {
+    private SlotCreationResult parseSlotCreation(ResultSet rs, boolean exportSnapshotUsed) {
         try {
             if (rs.next()) {
                 String slotName = rs.getString("slot_name");
@@ -479,7 +521,8 @@ public class PostgresReplicationConnection extends JdbcConnection implements Rep
                 String snapName = rs.getString("snapshot_name");
                 String pluginName = rs.getString("output_plugin");
 
-                return new SlotCreationResult(slotName, startPoint, snapName, pluginName);
+                return new SlotCreationResult(
+                        slotName, startPoint, snapName, pluginName, exportSnapshotUsed);
             } else {
                 throw new ConnectException("No replication slot found");
             }

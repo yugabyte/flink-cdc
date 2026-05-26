@@ -337,6 +337,16 @@ public class PostgresSnapshotChangeEventSource
             }
         }
 
+        if (YugabyteDBServer.isEnabled()
+                && slotCreatedInfo != null
+                && slotCreatedInfo.isExportSnapshotUsed()
+                && !isOnDemand) {
+            String setSnapshotQuery =
+                    "SET TRANSACTION SNAPSHOT '" + slotCreatedInfo.snapshotName() + "';";
+            LOGGER.info("Setting snapshot for transaction with {}", setSnapshotQuery);
+            jdbcConnection.executeWithoutCommitting(setSnapshotQuery);
+        }
+
         if (YugabyteDBServer.isEnabled()) {
             String transactionIsolationLevelStatement =
                     "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL SERIALIZABLE, READ ONLY, DEFERRABLE;";
