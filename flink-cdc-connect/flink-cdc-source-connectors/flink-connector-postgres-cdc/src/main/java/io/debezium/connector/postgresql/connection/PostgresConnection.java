@@ -329,8 +329,13 @@ public class PostgresConnection extends JdbcConnection {
                                     return null;
                                 }
                                 final Long xmin = rs.getLong("catalog_xmin");
+                                final Long restartCommitHT = rs.getLong("yb_restart_commit_ht");
                                 return new ServerInfo.ReplicationSlot(
-                                        active, confirmedFlushedLsn, restartLsn, xmin);
+                                        active,
+                                        confirmedFlushedLsn,
+                                        restartLsn,
+                                        xmin,
+                                        restartCommitHT);
                             } else {
                                 LOGGER.debug(
                                         "No replication slot '{}' is present for plugin '{}' and database '{}'",

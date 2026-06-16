@@ -21,8 +21,14 @@ import java.util.stream.Collectors;
 
 public abstract class QueryingSnapshotter implements Snapshotter {
 
+    private SlotState slotState;
+
     @Override
-    public void init(PostgresConnectorConfig config, OffsetState sourceInfo, SlotState slotState) {}
+    public void init(PostgresConnectorConfig config, OffsetState sourceInfo, SlotState slotState) {
+        if (YugabyteDBServer.isEnabled()) {
+            this.slotState = slotState;
+        }
+    }
 
     @Override
     public Optional<String> buildSnapshotQuery(
@@ -50,10 +56,23 @@ public abstract class QueryingSnapshotter implements Snapshotter {
         if (YugabyteDBServer.isEnabled()
                 && newSlotInfo != null
                 && newSlotInfo.isExportSnapshotUsed()) {
-            // YB Change: We will set the transaction snapshot separately otherwise we will get an
-            // exception with the error message: ERROR: cannot export/import a snapshot in Batch
-            // Execution.
+            // YB: SET TRANSACTION SNAPSHOT is issued separately by the caller; only set isolation.
             return "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;";
+        } else if (YugabyteDBServer.isEnabled()) {
+            // YB fallback: EXPORT_SNAPSHOT failed (USE_SNAPSHOT) or connector restarted with an
+            // existing slot (newSlotInfo is null). Pin reads via yb_read_time to the slot's hybrid
+            // time so the snapshot doesn't expire after timestamp_history_retention_interval_sec.
+            try {
+                Thread.sleep(1000);
+            } catch (Exception e) {
+                throw new RuntimeException("Exception while waiting", e);
+            }
+
+            String snapshotTimeHT =
+                    newSlotInfo != null
+                            ? newSlotInfo.snapshotName()
+                            : String.valueOf(slotState.slotRestartCommitHT());
+            return ybSnapshotStatement(snapshotTimeHT);
         }
 
         // PG case
@@ -63,5 +82,14 @@ public abstract class QueryingSnapshotter implements Snapshotter {
             return "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ; \n" + snapSet;
         }
         return Snapshotter.super.snapshotTransactionIsolationLevelStatement(newSlotInfo);
+    }
+
+    private String ybSnapshotStatement(String ybReadTime) {
+        return String.format(
+                "DO LANGUAGE plpgsql $$ "
+                        + "BEGIN SET LOCAL yb_read_time TO '%1$s ht'; "
+                        + "EXCEPTION WHEN OTHERS THEN CALL set_yb_read_time('%1$s ht'); "
+                        + "END $$;",
+                ybReadTime);
     }
 }
